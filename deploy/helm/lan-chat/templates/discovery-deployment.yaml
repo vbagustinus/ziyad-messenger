@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-discovery
+  labels:
+    app: discovery
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: discovery
+  template:
+    metadata:
+      labels:
+        app: discovery
+    spec:
+      containers:
+        - name: discovery
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["/usr/local/bin/discovery"]
+          ports:
+            - containerPort: 8080
+            - containerPort: 5353
+              protocol: UDP

@@ -1,0 +1,14 @@
+go 1.22
+
+use (
+	./backend/admin-api
+	./backend/pkg/protocol
+	./backend/services/audit
+	./backend/services/auth
+	./backend/services/cluster
+	./backend/services/discovery
+	./backend/services/filetransfer
+	./backend/services/messaging
+	./backend/services/pki
+	./backend/services/presence
+)

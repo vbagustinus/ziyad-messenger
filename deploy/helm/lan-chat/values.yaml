@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: local/lan-chat
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  ports:
+    discovery: 8080
+    messaging: 8081
+    filetransfer: 8082
+    presence: 8083
+    audit: 8084
+    cluster: 8085
+
+ingress:
+  enabled: false
+
+persistence:
+  enabled: true
+  size: 1Gi

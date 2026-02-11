@@ -1,0 +1,37 @@
+# Binaries
+bin/
+backend/admin-api/bin/
+backend/services/**/bin/
+
+# Local Data (IMPORTANT: DO NOT PUSH)
+data/
+backend/admin-api/data/
+backend/services/auth/data/
+backend/services/audit/data/
+backend/services/chat/data/
+
+# Dependencies
+node_modules/
+.next/
+vendor/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Environment Files (Sensitive)
+.env
+.env.local
+.env.production
+backend/admin-api/.env
+
+# Flutter/Dart
+clients/desktop-app/build/
+clients/desktop-app/.dart_tool/
+clients/desktop-app/.packages
+clients/desktop-app/.pub-cache/
+clients/desktop-app/.pub/
+
+# Logs
+*.log
+backend/services/audit/*.log

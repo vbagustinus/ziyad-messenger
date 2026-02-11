@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-cluster
+  labels:
+    app: cluster
+spec:
+  serviceName: "cluster"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cluster
+  template:
+    metadata:
+      labels:
+        app: cluster
+    spec:
+      containers:
+        - name: cluster
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["/usr/local/bin/cluster"]
+          ports:
+            - containerPort: 8085
+            - containerPort: 10001 # Raft
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: raft-data
+              mountPath: /raft-data
+  volumeClaimTemplates:
+    - metadata:
+        name: raft-data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 1Gi

@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-messaging
+  labels:
+    app: messaging
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: messaging
+  template:
+    metadata:
+      labels:
+        app: messaging
+    spec:
+      containers:
+        - name: messaging
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["/usr/local/bin/messaging"]
+          ports:
+            - containerPort: 8081
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
