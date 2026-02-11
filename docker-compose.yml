@@ -47,7 +47,7 @@ services:
     ports:
       - "8091:8091"
     environment:
-      - NEXT_PUBLIC_ADMIN_API=http://60.60.111.97:8090
+      - NEXT_PUBLIC_ADMIN_API=http://192.168.200.252:8090
       - ADMIN_API_INTERNAL=http://admin-service:8090
     networks:
       - lan-chat-net
