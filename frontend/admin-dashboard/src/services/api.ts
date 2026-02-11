@@ -5,8 +5,23 @@ const getToken = () => {
   return localStorage.getItem('admin_token') ?? '';
 };
 
+const getBaseURL = () => {
+  const envVal = process.env.NEXT_PUBLIC_ADMIN_API;
+  if (envVal && !envVal.includes('localhost')) return envVal;
+  
+  // If we are in the browser and the baked-in URL is localhost, 
+  // but we are accessing via an IP, use the same IP but port 8090
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return `http://${hostname}:8090`;
+    }
+  }
+  return envVal ?? 'http://localhost:8090';
+};
+
 export const api: AxiosInstance = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_ADMIN_API ?? 'http://localhost:8090',
+  baseURL: getBaseURL(),
   headers: { 'Content-Type': 'application/json' },
 });
 
