@@ -1,0 +1,65 @@
+name: Build Desktop Clients
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build_windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Enable Windows Support
+        run: flutter config --enable-windows-desktop
+
+      - name: Get Dependencies
+        working-directory: clients/desktop-app
+        run: flutter pub get
+
+      - name: Build Windows
+        working-directory: clients/desktop-app
+        run: flutter build windows --release
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ziyad-messenger-windows
+          path: clients/desktop-app/build/windows/x64/runner/Release/
+
+  build_macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Enable macOS Support
+        run: flutter config --enable-macos-desktop
+
+      - name: Get Dependencies
+        working-directory: clients/desktop-app
+        run: flutter pub get
+
+      - name: Build macOS
+        working-directory: clients/desktop-app
+        run: flutter build macos --release
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ziyad-messenger-macos
+          path: clients/desktop-app/build/macos/Build/Products/Release/
