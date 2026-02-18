@@ -126,6 +126,10 @@ func main() {
 
 	http.HandleFunc("/upload", svc.UploadHandler)
 	http.HandleFunc("/download", svc.DownloadHandler)
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "File Transfer Service is running")
+	})
 
 	log.Println("File Transfer Service started on :8082")
 	log.Fatal(http.ListenAndServe(":8082", nil))

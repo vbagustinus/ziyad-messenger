@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -107,6 +108,10 @@ func main() {
 
 	http.HandleFunc("/heartbeat", svc.HeartbeatHandler)
 	http.HandleFunc("/status", svc.StatusHandler)
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "Presence Service is running")
+	})
 
 	log.Println("Presence Service started on :8083")
 	log.Fatal(http.ListenAndServe(":8083", nil))

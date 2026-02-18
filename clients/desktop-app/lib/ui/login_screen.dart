@@ -6,6 +6,7 @@ import '../services/directory_service.dart';
 import '../providers/chat_provider.dart';
 import '../config/app_config.dart';
 import 'chat_screen.dart';
+import 'connection_test_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final AuthService authService;
@@ -169,6 +170,18 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.small(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const ConnectionTestScreen(),
+            ),
+          );
+        },
+        backgroundColor: Colors.grey[300],
+        child: const Icon(Icons.network_check, color: Colors.black54),
       ),
     );
   }

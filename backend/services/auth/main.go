@@ -131,9 +131,9 @@ func (s *AuthService) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user User
-	// Join with roles to get role name from role_id
+	// Join with roles to get role name from role_id, fallback to role_id itself if roles table is empty
 	err := s.db.QueryRow(`
-		SELECT u.id, u.username, u.password_hash, COALESCE(r.name, 'user') as role 
+		SELECT u.id, u.username, u.password_hash, COALESCE(r.name, u.role_id, 'user') as role 
 		FROM users u 
 		LEFT JOIN roles r ON u.role_id = r.id 
 		WHERE u.username = ?`, req.Username).
@@ -163,6 +163,33 @@ func (s *AuthService) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *AuthService) ensureDefaultUser(username, password, role string) error {
+	var exists bool
+	err := s.db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username = ?)", username).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	hash, err := HashPassword(password)
+	if err != nil {
+		return err
+	}
+
+	userID := uuid.New().String()
+	now := time.Now().Unix()
+	_, err = s.db.Exec(`INSERT INTO users (id, username, full_name, password_hash, role_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		userID, username, "Administrator", hash, role, now, now)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Default user %s created", username)
+	return nil
+}
+
 func main() {
 	dbPath := os.Getenv("AUTH_DB_PATH")
 	if dbPath == "" {
@@ -178,6 +205,10 @@ func main() {
 	svc, err := NewAuthService(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize auth service: %v", err)
+	}
+
+	if err := svc.ensureDefaultUser("admin", "password", "admin"); err != nil {
+		log.Printf("Failed to ensure default user: %v", err)
 	}
 
 	http.HandleFunc("/register", svc.RegisterHandler)

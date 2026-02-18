@@ -1,4 +1,4 @@
-import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
+import axios, { type AxiosInstance, type InternalAxiosRequestConfig, type AxiosResponse, AxiosError } from 'axios';
 
 const getToken = () => {
   if (typeof window === 'undefined') return '';
@@ -32,8 +32,8 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 });
 
 api.interceptors.response.use(
-  (r) => r,
-  (err) => {
+  (r: AxiosResponse) => r,
+  (err: AxiosError) => {
     if (err.response?.status === 401) {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('admin_token');

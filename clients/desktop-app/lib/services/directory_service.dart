@@ -11,9 +11,8 @@ class DirectoryService {
   Future<List<User>> getUsers() async {
     try {
       final response = await http.get(
-        Uri.parse('$adminBaseUrl/admin/users'),
+        Uri.parse('$adminBaseUrl/public/users'),
         headers: {
-          'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
       );
@@ -38,9 +37,8 @@ class DirectoryService {
   Future<List<Map<String, dynamic>>> getChannels() async {
     try {
       final response = await http.get(
-        Uri.parse('$adminBaseUrl/admin/channels'),
+        Uri.parse('$adminBaseUrl/public/channels'),
         headers: {
-          'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
       );

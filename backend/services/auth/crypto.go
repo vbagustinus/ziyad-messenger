@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/argon2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type PasswordConfig struct {
@@ -42,6 +43,15 @@ func HashPassword(password string) (string, error) {
 
 // VerifyPassword checks if the provided password matches the encoded hash.
 func VerifyPassword(password, encodedHash string) (bool, error) {
+	// Check if it's a bcrypt hash (used by admin-service)
+	if strings.HasPrefix(encodedHash, "$2a$") || strings.HasPrefix(encodedHash, "$2b$") || strings.HasPrefix(encodedHash, "$2y$") {
+		err := bcrypt.CompareHashAndPassword([]byte(encodedHash), []byte(password))
+		if err != nil {
+			return false, nil
+		}
+		return true, nil
+	}
+
 	parts := strings.Split(encodedHash, "$")
 	if len(parts) != 6 {
 		return false, fmt.Errorf("invalid hash format")

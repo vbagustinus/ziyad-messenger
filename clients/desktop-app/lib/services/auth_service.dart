@@ -1,11 +1,10 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user.dart';
 
 class AuthService {
   final String baseUrl;
-  final _storage = const FlutterSecureStorage();
   User? _currentUser;
 
   AuthService({required this.baseUrl});
@@ -62,7 +61,8 @@ class AuthService {
           token: token ?? '',
         );
 
-        await _storage.write(key: 'jwt_token', value: token ?? '');
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('jwt_token', token ?? '');
         return true;
       }
       // Log for debugging (e.g. 401 = wrong password, 404 = wrong URL)
@@ -76,10 +76,12 @@ class AuthService {
 
   Future<void> logout() async {
     _currentUser = null;
-    await _storage.delete(key: 'jwt_token');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('jwt_token');
   }
 
   Future<String?> getToken() async {
-    return await _storage.read(key: 'jwt_token');
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('jwt_token');
   }
 }

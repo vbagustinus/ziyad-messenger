@@ -9,26 +9,26 @@
 class AppConfig {
   static const String authBaseUrl = String.fromEnvironment(
     'AUTH_BASE_URL',
-    defaultValue: 'http://localhost:8086',
+    defaultValue: 'http://192.168.200.252:8086',
   );
 
   static const String messagingBaseUrl = String.fromEnvironment(
     'MESSAGING_BASE_URL',
-    defaultValue: 'http://localhost:8081',
+    defaultValue: 'http://192.168.200.252:8081',
   );
 
   static const String presenceBaseUrl = String.fromEnvironment(
     'PRESENCE_BASE_URL',
-    defaultValue: 'http://localhost:8083',
+    defaultValue: 'http://192.168.200.252:8083',
   );
 
   static const String fileTransferBaseUrl = String.fromEnvironment(
     'FILE_TRANSFER_BASE_URL',
-    defaultValue: 'http://localhost:8082',
+    defaultValue: 'http://192.168.200.252:8082',
   );
 
   static const String adminApiBaseUrl = String.fromEnvironment(
     'ADMIN_API_BASE_URL',
-    defaultValue: 'http://localhost:8090',
+    defaultValue: 'http://192.168.200.252:8090',
   );
 }

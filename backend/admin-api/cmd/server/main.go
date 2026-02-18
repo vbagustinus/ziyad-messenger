@@ -102,6 +102,9 @@ func main() {
 		api.GET("/ws", websocket.HandleWS(hub))
 	}
 
+	// Public endpoints (no auth required) for client apps
+	r.GET("/public/channels", channels.List)
+	r.GET("/public/users", users.List)
 	r.GET("/health", system.Health)
 
 	port := os.Getenv("PORT")

@@ -245,6 +245,10 @@ func main() {
 
 	http.HandleFunc("/ws", router.HandleWS)
 	http.HandleFunc("/history", router.HistoryHandler)
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "Messaging Service is running")
+	})
 	http.HandleFunc("/send", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
