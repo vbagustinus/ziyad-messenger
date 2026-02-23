@@ -59,8 +59,10 @@ services:
     command: /usr/local/bin/messaging
     ports:
       - "8081:8081"
+    environment:
+      - MESSAGING_DB_PATH=/app/data/platform.db
     volumes:
-      - ./data/chat:/app/data
+      - ./data/shared:/app/data
     networks:
       - lan-chat-net
 

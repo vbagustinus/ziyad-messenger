@@ -58,6 +58,7 @@ func migrate() error {
 	CREATE TABLE IF NOT EXISTS channels (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
+		type TEXT DEFAULT 'public', -- 'public', 'private', 'dm'
 		department_id TEXT,
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL,
@@ -65,6 +66,17 @@ func migrate() error {
 		FOREIGN KEY (department_id) REFERENCES departments(id)
 	);
 	CREATE INDEX IF NOT EXISTS idx_channels_name ON channels(name);
+
+	CREATE TABLE IF NOT EXISTS channel_members (
+		channel_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		role TEXT DEFAULT 'member', -- 'owner', 'admin', 'member'
+		joined_at INTEGER NOT NULL,
+		PRIMARY KEY (channel_id, user_id),
+		FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_channel_members_user ON channel_members(user_id);
 
 	CREATE TABLE IF NOT EXISTS users (
 		id TEXT PRIMARY KEY,

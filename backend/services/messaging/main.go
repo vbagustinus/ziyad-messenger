@@ -53,6 +53,16 @@ func NewMessageRouter(dbPath string) (*MessageRouter, error) {
 
 func initDB(db *sql.DB) error {
 	query := `
+	CREATE TABLE IF NOT EXISTS channels (
+		id TEXT PRIMARY KEY,
+		name TEXT,
+		type TEXT DEFAULT 'public'
+	);
+	CREATE TABLE IF NOT EXISTS channel_members (
+		channel_id TEXT,
+		user_id TEXT,
+		PRIMARY KEY (channel_id, user_id)
+	);
 	CREATE TABLE IF NOT EXISTS messages (
 		id TEXT PRIMARY KEY,
 		channel_id TEXT,
@@ -105,27 +115,114 @@ func (r *MessageRouter) Unregister(client *Client) {
 	log.Printf("Client unregistered: %s", userID)
 }
 
+// getChannelMembers returns a list of user IDs who are members of the channel.
+// If the channel is 'public', it returns an empty list (meaning broadcast to all).
+func (r *MessageRouter) getChannelMembers(channelID string) ([]string, string, error) {
+	var chType string
+	err := r.db.QueryRow("SELECT type FROM channels WHERE id = ?", channelID).Scan(&chType)
+	if err != nil {
+		// Fallback for demo or if channel not in main DB (messaging might have its own table if synced)
+		// Assuming for now it's in the same DB or we have access to it.
+		return nil, "public", nil
+	}
+
+	if chType == "public" {
+		return nil, "public", nil
+	}
+
+	rows, err := r.db.Query("SELECT user_id FROM channel_members WHERE channel_id = ?", channelID)
+	if err != nil {
+		return nil, chType, err
+	}
+	defer rows.Close()
+
+	var members []string
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err == nil {
+			members = append(members, uid)
+		}
+	}
+	return members, chType, nil
+}
+
 // Broadcast sends a message to specific users (who should receive this message)
-// For now, it broadcasts to everyone globally for demo, or we can look up channel members.
-// Realistically, it should send to members of req.ChannelID.
 func (r *MessageRouter) Broadcast(msg *protocol.Message) {
+	members, chType, err := r.getChannelMembers(msg.ChannelID)
+	if err != nil {
+		log.Printf("Error getting members: %v", err)
+		return
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	data, _ := json.Marshal(msg)
 
-	// In a real Slack-like app, we'd only send to users in the same channel.
-	// For this LAN implementation, we broadcast to all online users.
-	// The client-side will filter by ChannelID.
-	for _, conns := range r.clients {
-		for _, client := range conns {
-			select {
-			case client.Send <- data:
-			default:
-				// If buffer is full, we skip or handle accordingly
+	if chType == "public" {
+		// Broadcast to everyone online
+		for _, conns := range r.clients {
+			for _, client := range conns {
+				select {
+				case client.Send <- data:
+				default:
+				}
+			}
+		}
+	} else {
+		// Only send to members
+		for _, userID := range members {
+			if conns, ok := r.clients[userID]; ok {
+				for _, client := range conns {
+					select {
+					case client.Send <- data:
+					default:
+					}
+				}
 			}
 		}
 	}
+}
+
+// findOrCreateDMChannel ensures a DM channel exists between two users.
+func (r *MessageRouter) findOrCreateDMChannel(u1, u2 string) (string, error) {
+	// Standardized name for DM: "dm:<uid1>:<uid2>" where uid1 < uid2
+	p1, p2 := u1, u2
+	if p1 > p2 {
+		p1, p2 = u2, u1
+	}
+	dmID := fmt.Sprintf("dm:%s:%s", p1, p2)
+
+	var exists bool
+	err := r.db.QueryRow("SELECT EXISTS(SELECT 1 FROM channels WHERE id = ?)", dmID).Scan(&exists)
+	if err != nil {
+		return "", err
+	}
+
+	if !exists {
+		tx, err := r.db.Begin()
+		if err != nil {
+			return "", err
+		}
+		defer tx.Rollback()
+
+		_, err = tx.Exec("INSERT INTO channels (id, name, type) VALUES (?, ?, ?)", dmID, "Direct Message", "dm")
+		if err != nil {
+			return "", err
+		}
+		_, err = tx.Exec("INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?)", dmID, u1)
+		if err != nil {
+			return "", err
+		}
+		_, err = tx.Exec("INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?)", dmID, u2)
+		if err != nil {
+			return "", err
+		}
+		if err := tx.Commit(); err != nil {
+			return "", err
+		}
+	}
+	return dmID, nil
 }
 
 // HandleWS handles WebSocket upgrade and loop
@@ -158,7 +255,19 @@ func (r *MessageRouter) HandleWS(w http.ResponseWriter, req *http.Request) {
 
 			var sendReq protocol.SendMessageRequest
 			if err := json.Unmarshal(message, &sendReq); err == nil {
-				msg, err := r.SaveMessage(sendReq, userID)
+				// DM detection: if channel_id matches a user pattern or we decide by prefix
+				// For LAN Slack, if a client sends a message to another UserID instead of a ChannelID,
+				// we treat it as a DM request.
+				finalChannelID := sendReq.ChannelID
+				if len(sendReq.ChannelID) > 0 && sendReq.ChannelID[0] != 'c' && sendReq.ChannelID != "general" {
+					// Heuristic: if it's not a known channel prefix, try DM
+					// In a real app, we'd check if ChannelID exists as a user if not as a channel.
+					if dmID, err := r.findOrCreateDMChannel(userID, sendReq.ChannelID); err == nil {
+						finalChannelID = dmID
+					}
+				}
+
+				msg, err := r.SaveMessage(sendReq, userID, finalChannelID)
 				if err == nil {
 					r.Broadcast(msg)
 				}
@@ -175,10 +284,10 @@ func (r *MessageRouter) HandleWS(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (r *MessageRouter) SaveMessage(req protocol.SendMessageRequest, senderID string) (*protocol.Message, error) {
+func (r *MessageRouter) SaveMessage(req protocol.SendMessageRequest, senderID string, channelID string) (*protocol.Message, error) {
 	msg := &protocol.Message{
 		ID:        uuid.New().String(),
-		ChannelID: req.ChannelID,
+		ChannelID: channelID,
 		SenderID:  senderID,
 		Timestamp: time.Now().UnixMilli(),
 		Type:      req.Type,
@@ -264,7 +373,7 @@ func main() {
 			senderID = "anonymous"
 		}
 
-		msg, err := router.SaveMessage(msgReq, senderID)
+		msg, err := router.SaveMessage(msgReq, senderID, msgReq.ChannelID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

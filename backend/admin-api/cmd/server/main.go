@@ -88,6 +88,11 @@ func main() {
 		api.POST("/channels", middleware.Audit("channel.create", "channels"), channels.Create)
 		api.DELETE("/channels/:id", middleware.Audit("channel.delete", "channels"), channels.Delete)
 
+		// Membership management
+		api.GET("/channels/:id/members", channels.ListMembers)
+		api.POST("/channels/:id/members", channels.AddMember)
+		api.DELETE("/channels/:id/members/:user_id", channels.RemoveMember)
+
 		api.GET("/monitoring/network", monitoring.Network)
 		api.GET("/monitoring/users", monitoring.Users)
 		api.GET("/monitoring/messages", monitoring.Messages)
