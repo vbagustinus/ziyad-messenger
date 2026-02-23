@@ -19,6 +19,14 @@ class ChatProvider extends ChangeNotifier {
     messagingService.messageStream.listen((msg) {
       if (!messageHistory.containsKey(msg.channelId)) {
         messageHistory[msg.channelId] = [];
+        
+        // If it's a new channel/user we don't know about yet, refresh directory
+        final knownChannel = channels.any((c) => c['id'] == msg.channelId);
+        final knownUser = users.any((u) => u.id == msg.channelId);
+        
+        if (!knownChannel && !knownUser) {
+          loadDirectory();
+        }
       }
       messageHistory[msg.channelId]!.add(msg);
       notifyListeners();
@@ -36,12 +44,29 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  List<Map<String, dynamic>> currentChannelMembers = [];
+
   Future<void> selectChannel(String channelId) async {
     currentChannelId = channelId;
+    currentChannelMembers = []; // Reset
+    
+    // Safety check: if choosing a user for DM that isn't yet in history but is in users list,
+    // this handles the initial view.
+    final known = channels.any((c) => c['id'] == channelId) || users.any((u) => u.id == channelId);
+    if (!known) {
+      await loadDirectory();
+    }
+
     if (!messageHistory.containsKey(channelId)) {
       final history = await messagingService.getHistory(channelId);
       messageHistory[channelId] = history;
     }
+
+    // Load members if it's a channel (not a DM)
+    if (channels.any((c) => c['id'] == channelId)) {
+      currentChannelMembers = await directoryService.getChannelMembers(channelId);
+    }
+
     notifyListeners();
   }
 

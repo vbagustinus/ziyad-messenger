@@ -51,7 +51,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // Initialize services with the authenticated user data
       final msgService = MessagingService(
         httpBaseUrl: AppConfig.messagingBaseUrl,
-        wsBaseUrl: AppConfig.messagingBaseUrl.replaceAll('http://', 'ws://'),
+        wsBaseUrl: AppConfig.wsMessagingBaseUrl,
         token: user.token ?? '',
         userId: user.id,
       );

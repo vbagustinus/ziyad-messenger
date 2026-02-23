@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../providers/chat_provider.dart';
 import '../services/auth_service.dart';
 import '../services/file_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/message.dart';
 import '../config/app_config.dart';
 
@@ -20,6 +21,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   late FileService _fileService;
+  bool _showMembers = false;
 
   @override
   void initState() {
@@ -165,21 +167,65 @@ class _ChatScreenState extends State<ChatScreen> {
                                 style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
                               ),
                               const Spacer(),
+                              IconButton(
+                                icon: const Icon(Icons.people_outline, color: Colors.black38),
+                                onPressed: () {
+                                  setState(() {
+                                    _showMembers = !_showMembers;
+                                  });
+                                },
+                              ),
                               const Icon(Icons.info_outline, color: Colors.black38, size: 20),
                             ],
                           ),
                         ),
                         
-                        // Messages
+                        // Messages & Members
                         Expanded(
-                          child: ListView.builder(
-                            controller: _scrollController,
-                            padding: const EdgeInsets.all(20),
-                            itemCount: provider.messageHistory[provider.currentChannelId!]?.length ?? 0,
-                            itemBuilder: (context, index) {
-                              final msg = provider.messageHistory[provider.currentChannelId!]![index];
-                              return _buildMessageItem(msg, currentUserId);
-                            },
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: ListView.builder(
+                                  controller: _scrollController,
+                                  padding: const EdgeInsets.all(20),
+                                  itemCount: provider.messageHistory[provider.currentChannelId!]?.length ?? 0,
+                                  itemBuilder: (context, index) {
+                                    final msg = provider.messageHistory[provider.currentChannelId!]![index];
+                                    return _buildMessageItem(msg, currentUserId, auth.currentUser?.token);
+                                  },
+                                ),
+                              ),
+                              if (_showMembers && provider.currentChannelMembers.isNotEmpty)
+                                Container(
+                                  width: 200,
+                                  decoration: const BoxDecoration(
+                                    border: Border(left: BorderSide(color: Colors.black12)),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Padding(
+                                        padding: EdgeInsets.all(16.0),
+                                        child: Text('Members', style: TextStyle(fontWeight: FontWeight.bold)),
+                                      ),
+                                      Expanded(
+                                        child: ListView.builder(
+                                          itemCount: provider.currentChannelMembers.length,
+                                          itemBuilder: (context, index) {
+                                            final m = provider.currentChannelMembers[index];
+                                            return ListTile(
+                                              leading: const CircleAvatar(radius: 12, child: Icon(Icons.person, size: 12)),
+                                              title: Text(m['username'] ?? '', style: const TextStyle(fontSize: 14)),
+                                              subtitle: Text(m['role'] ?? '', style: const TextStyle(fontSize: 10)),
+                                              dense: true,
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                         
@@ -279,6 +325,17 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         ...items.map((item) {
           final isSelected = item['id'] == currentId;
+          final type = item['type'] ?? 'public';
+          
+          IconData iconData = icon ?? Icons.tag;
+          if (title == 'Channels') {
+            if (type == 'private') {
+              iconData = Icons.lock_outline;
+            } else {
+              iconData = Icons.tag;
+            }
+          }
+
           return Material(
             color: isSelected ? const Color(0xFF1164A3) : Colors.transparent,
             child: InkWell(
@@ -287,7 +344,11 @@ class _ChatScreenState extends State<ChatScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Row(
                   children: [
-                    Icon(icon, color: isSelected ? Colors.white : (iconColor ?? Colors.white38), size: 16),
+                    Icon(
+                      iconData, 
+                      color: isSelected ? Colors.white : (iconColor ?? Colors.white38), 
+                      size: isSelected ? 18 : 16
+                    ),
                     const SizedBox(width: 12),
                     Text(
                       item['name'],
@@ -308,7 +369,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildMessageItem(Message msg, String? currentUserId) {
+  Widget _buildMessageItem(Message msg, String? currentUserId, String? token) {
     // In a real Slack app, messages from the same user are clustered.
     // For now, let's keep it simple.
     final timeStr = DateFormat('h:mm a').format(msg.timestamp);
@@ -341,7 +402,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ],
                 ),
                 isFile 
-                  ? _buildFileContent(msg.content)
+                  ? _buildFileContent(msg.content, token)
                   : Text(msg.content, style: const TextStyle(fontSize: 15, height: 1.4)),
               ],
             ),
@@ -351,7 +412,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildFileContent(String content) {
+  Widget _buildFileContent(String content, String? token) {
     final parts = content.split(':');
     if (parts.length < 3) return const Text('Invalid file');
     final fileId = parts[1];
@@ -380,9 +441,13 @@ class _ChatScreenState extends State<ChatScreen> {
           const SizedBox(width: 24),
           IconButton(
             icon: const Icon(Icons.download, color: Colors.black54),
-            onPressed: () {
-              // In a real app, use url_launcher or custom download logic
-              print('Downloading $fileId');
+            onPressed: () async {
+              final url = Uri.parse('${AppConfig.fileTransferBaseUrl}/download?id=$fileId');
+              if (await canLaunchUrl(url)) {
+                await launchUrl(url, mode: LaunchMode.externalApplication);
+              } else {
+                debugPrint('Could not launch $url');
+              }
             },
           )
         ],

@@ -53,4 +53,25 @@ class DirectoryService {
       return [];
     }
   }
+
+  Future<List<Map<String, dynamic>>> getChannelMembers(String channelId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$adminBaseUrl/admin/channels/$channelId/members'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return List<Map<String, dynamic>>.from(data['members'] ?? []);
+      }
+      return [];
+    } catch (e) {
+      print('Error fetching channel members: $e');
+      return [];
+    }
+  }
 }

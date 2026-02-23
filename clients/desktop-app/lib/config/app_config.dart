@@ -7,28 +7,17 @@
 /// - Physical device: use your machine's LAN IP, e.g.
 ///   --dart-define=AUTH_BASE_URL=http://192.168.1.100:8086
 class AppConfig {
-  static const String authBaseUrl = String.fromEnvironment(
-    'AUTH_BASE_URL',
-    defaultValue: 'http://192.168.200.252:8086',
+  /// The central IP or Domain where the backend is running.
+  /// Change this ONE line to point to a new server!
+  static const String host = String.fromEnvironment(
+    'BACKEND_HOST',
+    defaultValue: '192.168.200.252',
   );
 
-  static const String messagingBaseUrl = String.fromEnvironment(
-    'MESSAGING_BASE_URL',
-    defaultValue: 'http://192.168.200.252:8081',
-  );
-
-  static const String presenceBaseUrl = String.fromEnvironment(
-    'PRESENCE_BASE_URL',
-    defaultValue: 'http://192.168.200.252:8083',
-  );
-
-  static const String fileTransferBaseUrl = String.fromEnvironment(
-    'FILE_TRANSFER_BASE_URL',
-    defaultValue: 'http://192.168.200.252:8082',
-  );
-
-  static const String adminApiBaseUrl = String.fromEnvironment(
-    'ADMIN_API_BASE_URL',
-    defaultValue: 'http://192.168.200.252:8090',
-  );
+  static String get authBaseUrl => 'http://$host:8086';
+  static String get messagingBaseUrl => 'http://$host:8081';
+  static String get wsMessagingBaseUrl => 'ws://$host:8081';
+  static String get presenceBaseUrl => 'http://$host:8083';
+  static String get fileTransferBaseUrl => 'http://$host:8082';
+  static String get adminApiBaseUrl => 'http://$host:8090';
 }
