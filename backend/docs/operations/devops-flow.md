@@ -20,13 +20,14 @@ Example (conceptual):
 
 ```bash
 # Build all Go services
-make build
+make -f backend/deploy/Makefile build
 
 # Run tests
-make test
+cd backend && go test ./...
+cd ../clients/desktop-app && flutter test
 
 # Build Docker images
-docker build -f deploy/Dockerfile -t lan-chat/services:${VERSION} .
+docker build -f backend/deploy/Dockerfile -t lan-chat/services:${VERSION} .
 # Or separate Dockerfile per service
 ```
 
@@ -41,7 +42,7 @@ docker build -f deploy/Dockerfile -t lan-chat/services:${VERSION} .
 | Method | Use case |
 |--------|----------|
 | **docker-compose** | Single node or dev; `docker-compose up -d` |
-| **Helm** | Kubernetes; `helm install lan-chat ./deploy/helm/lan-chat -f overrides.yaml` |
+| **Helm** | Kubernetes; `helm install lan-chat ./backend/deploy/helm/lan-chat -f overrides.yaml` |
 | **Ansible / Salt / Scripts** | Bare metal or VMs; copy binaries, config, and systemd units; restart services |
 | **Offline bundle** | Tar or USB with versioned binaries, images, config templates, and upgrade docs |
 

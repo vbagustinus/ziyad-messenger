@@ -2,6 +2,10 @@
 
 Daftar API yang tersedia di backend untuk dikonsumsi oleh client.
 
+Semua service HTTP backend mendukung header `X-Request-ID`: jika client kirim, nilai dipropagasikan; jika tidak, service akan generate otomatis dan mengembalikannya di response.
+Access log HTTP service ditulis dalam format JSON line agar langsung kompatibel dengan pipeline observability (ELK/Loki/OpenSearch).
+Service non-admin (`auth`, `filetransfer`, `audit`, `cluster`) kini memakai hardening baseline: rate limit per-IP, body size limit, validasi input, dan timeout server HTTP.
+
 ---
 
 ## 🚀 Alur Komunikasi (Slack-Style)
@@ -10,7 +14,7 @@ Daftar API yang tersedia di backend untuk dikonsumsi oleh client.
 
 1. **Daftarkan Channel**: Gunakan Admin Dashboard atau Admin API (`POST /admin/channels`).
 2. **Kelola Anggota**: Tambahkan user ke channel (`POST /admin/channels/{id}/members`).
-3. **Kirim/Terima**: Client konek ke WebSocket Messaging Service (`/ws?user_id=...`). Server hanya akan mengirim pesan grup ke user yang terdaftar sebagai anggota.
+3. **Kirim/Terima**: Client konek ke WebSocket Messaging Service (`/ws?token=...`). Server hanya akan mengirim pesan grup ke user yang terdaftar sebagai anggota.
 
 ### 2. Pesan Langsung (Direct Message)
 
@@ -48,13 +52,13 @@ Digunakan khusus untuk Admin Dashboard.
 
 ### Monitoring & System
 
-- `GET /admin/monitoring/network`: Status jaringan
-- `GET /admin/monitoring/users`: Statistik user online
-- `GET /admin/monitoring/messages`: Statistik pesan
-- `GET /admin/monitoring/files`: Statistik transfer file
-- `GET /admin/monitoring/system`: Info sistem server
+- `GET /admin/monitoring/overview`: Ringkasan monitoring (network, users, messages, files, system)
 - `GET /admin/system/health`: Cek kesehatan sistem
+- `GET /admin/system/metrics`: Metrik HTTP per endpoint admin (count, error_count, avg/p95/p99/max latency)
 - `GET /admin/cluster/status`: Status cluster node
+
+Semua response Admin API menyertakan header `X-Request-ID` untuk tracing request lintas log.
+Set `ADMIN_ACCESS_LOG_DIR` untuk menyimpan access log JSON per hari (`access-YYYY-MM-DD.log`).
 
 ---
 
@@ -72,7 +76,7 @@ Digunakan untuk registrasi dan login user umum.
 
 Layanan utama untuk pengiriman pesan.
 
-- `GET /ws?user_id={id}`: Koneksi WebSocket untuk real-time chat
+- `GET /ws?token={jwt}`: Koneksi WebSocket untuk real-time chat
 - `GET /history?channel_id={id}`: Ambil riwayat pesan dalam channel
 - `POST /send`: Kirim pesan via HTTP (Alternatif WebSocket)
 - `GET /health`: Cek status service

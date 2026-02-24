@@ -1,12 +1,19 @@
 package main
 
 import (
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type UserStatus int
@@ -24,16 +31,84 @@ type ValidationRequest struct {
 }
 
 type PresenceService struct {
-	statuses map[string]UserStatus
-	lastSeen map[string]time.Time
-	mu       sync.RWMutex
+	db *sql.DB
 }
 
-func NewPresenceService() *PresenceService {
-	return &PresenceService{
-		statuses: make(map[string]UserStatus),
-		lastSeen: make(map[string]time.Time),
+const requestIDHeader = "X-Request-ID"
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusRecorder) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func getOrCreateRequestID(req *http.Request) string {
+	if rid := strings.TrimSpace(req.Header.Get(requestIDHeader)); rid != "" {
+		return rid
 	}
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func withRequestTrace(name string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rid := getOrCreateRequestID(r)
+		w.Header().Set(requestIDHeader, rid)
+		r.Header.Set(requestIDHeader, rid)
+
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next(rec, r)
+
+		entry := map[string]interface{}{
+			"ts":         time.Now().UTC().Format(time.RFC3339Nano),
+			"service":    "presence",
+			"handler":    name,
+			"request_id": rid,
+			"method":     r.Method,
+			"path":       r.URL.Path,
+			"status":     rec.status,
+			"latency_ms": float64(time.Since(start).Microseconds()) / 1000.0,
+		}
+		if b, err := json.Marshal(entry); err == nil {
+			log.Println(string(b))
+		}
+	}
+}
+
+func NewPresenceService(dbPath string) (*PresenceService, error) {
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	svc := &PresenceService{db: db}
+	if err := svc.initDB(); err != nil {
+		return nil, err
+	}
+	return svc, nil
+}
+
+func (s *PresenceService) initDB() error {
+	query := `
+	CREATE TABLE IF NOT EXISTS user_presence (
+		user_id TEXT PRIMARY KEY,
+		status INTEGER NOT NULL,
+		last_seen INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_user_presence_status ON user_presence(status);
+	CREATE INDEX IF NOT EXISTS idx_user_presence_last_seen ON user_presence(last_seen);
+	`
+	_, err := s.db.Exec(query)
+	return err
 }
 
 // HeartbeatHandler updates a user's status and last seen time.
@@ -48,11 +123,25 @@ func (s *PresenceService) HeartbeatHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Invalid body", http.StatusBadRequest)
 		return
 	}
+	if req.UserID == "" {
+		http.Error(w, "Missing user_id", http.StatusBadRequest)
+		return
+	}
 
-	s.mu.Lock()
-	s.statuses[req.UserID] = req.Status
-	s.lastSeen[req.UserID] = time.Now()
-	s.mu.Unlock()
+	now := time.Now().Unix()
+	_, err := s.db.Exec(`
+		INSERT INTO user_presence (user_id, status, last_seen, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET
+			status = excluded.status,
+			last_seen = excluded.last_seen,
+			updated_at = excluded.updated_at`,
+		req.UserID, req.Status, now, now,
+	)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -65,18 +154,26 @@ func (s *PresenceService) StatusHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.mu.RLock()
-	status, exists := s.statuses[userID]
-	lastSeen := s.lastSeen[userID]
-	s.mu.RUnlock()
-
-	if !exists {
-		status = StatusOffline
+	var status int
+	var lastSeenUnix int64
+	err := s.db.QueryRow(
+		`SELECT status, last_seen FROM user_presence WHERE user_id = ?`,
+		userID,
+	).Scan(&status, &lastSeenUnix)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			status = int(StatusOffline)
+			lastSeenUnix = 0
+		} else {
+			http.Error(w, "DB error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Auto-offline logic if heartbeat missing for > 1 minute
+	lastSeen := time.Unix(lastSeenUnix, 0)
 	if time.Since(lastSeen) > 1*time.Minute {
-		status = StatusOffline
+		status = int(StatusOffline)
 	}
 
 	resp := map[string]interface{}{
@@ -91,28 +188,39 @@ func (s *PresenceService) StatusHandler(w http.ResponseWriter, r *http.Request) 
 func (s *PresenceService) CleanupLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	for range ticker.C {
-		s.mu.Lock()
-		for user, last := range s.lastSeen {
-			if time.Since(last) > 1*time.Minute {
-				s.statuses[user] = StatusOffline
-			}
-		}
-		s.mu.Unlock()
+		cutoff := time.Now().Add(-1 * time.Minute).Unix()
+		_, _ = s.db.Exec(
+			`UPDATE user_presence SET status = ? WHERE last_seen < ?`,
+			int(StatusOffline), cutoff,
+		)
 	}
 }
 
 func main() {
-	svc := NewPresenceService()
+	dbPath := os.Getenv("PRESENCE_DB_PATH")
+	if dbPath == "" {
+		dbPath = "data/presence.db"
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		log.Fatalf("Failed to create data dir: %v", err)
+	}
+
+	svc, err := NewPresenceService(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to init presence service: %v", err)
+	}
 
 	go svc.CleanupLoop()
 
-	http.HandleFunc("/heartbeat", svc.HeartbeatHandler)
-	http.HandleFunc("/status", svc.StatusHandler)
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/heartbeat", withRequestTrace("heartbeat", svc.HeartbeatHandler))
+	mux.HandleFunc("/status", withRequestTrace("status", svc.StatusHandler))
+	mux.HandleFunc("/health", withRequestTrace("health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "Presence Service is running")
-	})
+	}))
 
 	log.Println("Presence Service started on :8083")
-	log.Fatal(http.ListenAndServe(":8083", nil))
+	log.Fatal(http.ListenAndServe(":8083", mux))
 }

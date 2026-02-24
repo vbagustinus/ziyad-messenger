@@ -54,6 +54,27 @@ func List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"channels": list})
 }
 
+func ListPublic(c *gin.Context) {
+	rows, err := db.DB.Query(`SELECT id, name, type, department_id, created_at, updated_at, created_by FROM channels WHERE type = 'public' ORDER BY name`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	list := []Channel{}
+	for rows.Next() {
+		var ch Channel
+		var createdBy *string
+		_ = rows.Scan(&ch.ID, &ch.Name, &ch.Type, &ch.DepartmentID, &ch.CreatedAt, &ch.UpdatedAt, &createdBy)
+		if createdBy != nil {
+			ch.CreatedBy = *createdBy
+		}
+		list = append(list, ch)
+	}
+	c.JSON(http.StatusOK, gin.H{"channels": list})
+}
+
 func Create(c *gin.Context) {
 	var req CreateChannelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

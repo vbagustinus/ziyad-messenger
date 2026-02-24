@@ -53,11 +53,11 @@ class _LoginScreenState extends State<LoginScreen> {
         httpBaseUrl: AppConfig.messagingBaseUrl,
         wsBaseUrl: AppConfig.wsMessagingBaseUrl,
         token: user.token ?? '',
-        userId: user.id,
       );
       
       final dirService = DirectoryService(
         adminBaseUrl: AppConfig.adminApiBaseUrl,
+        messagingBaseUrl: AppConfig.messagingBaseUrl,
         token: user.token ?? '',
       );
 

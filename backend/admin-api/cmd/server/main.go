@@ -41,8 +41,8 @@ func main() {
 	hub := websocket.NewHub()
 	go hub.Run()
 
-	r := gin.Default()
-	r.Use(gin.Recovery())
+	r := gin.New()
+	r.Use(gin.Recovery(), middleware.RequestID(), middleware.AccessLogAndMetrics())
 
 	r.Use(func(c *gin.Context) {
 		// Allow any origin in LAN for ease of testing
@@ -93,22 +93,19 @@ func main() {
 		api.POST("/channels/:id/members", channels.AddMember)
 		api.DELETE("/channels/:id/members/:user_id", channels.RemoveMember)
 
-		api.GET("/monitoring/network", monitoring.Network)
-		api.GET("/monitoring/users", monitoring.Users)
-		api.GET("/monitoring/messages", monitoring.Messages)
-		api.GET("/monitoring/files", monitoring.Files)
-		api.GET("/monitoring/system", monitoring.System)
+		api.GET("/monitoring/overview", monitoring.Overview)
 
 		api.GET("/audit", auditHandler.ListHandler)
 
 		api.GET("/system/health", system.Health)
+		api.GET("/system/metrics", system.Metrics)
 		api.GET("/cluster/status", cluster.Status)
 
 		api.GET("/ws", websocket.HandleWS(hub))
 	}
 
 	// Public endpoints (no auth required) for client apps
-	r.GET("/public/channels", channels.List)
+	r.GET("/public/channels", channels.ListPublic)
 	r.GET("/public/users", users.List)
 	r.GET("/health", system.Health)
 

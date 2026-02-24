@@ -6,16 +6,22 @@ From the **project root** (`ziyad-mesengger/`):
 
 ```bash
 # Build all service images
-make build
-# or: docker-compose build
+make -f backend/deploy/Makefile build
+# or:
+cd backend/deploy && make build
+# or: docker-compose -f backend/deploy/docker-compose.yml build
 
 # Start all services in the background
-make run-all
-# or: docker-compose up -d
+make -f backend/deploy/Makefile run-all
+# or:
+cd backend/deploy && make run-all
+# or: docker-compose -f backend/deploy/docker-compose.yml up -d
 
 # View logs (optional)
-make logs
-# or: docker-compose logs -f
+make -f backend/deploy/Makefile logs
+# or:
+cd backend/deploy && make logs
+# or: docker-compose -f backend/deploy/docker-compose.yml logs -f
 ```
 
 ### Service ports (localhost)
@@ -64,8 +70,10 @@ curl -s "http://localhost:8083/status?user_id=<user_id>"
 ### Stop
 
 ```bash
-make stop-all
-# or: docker-compose down
+make -f backend/deploy/Makefile stop-all
+# or:
+cd backend/deploy && make stop-all
+# or: docker-compose -f backend/deploy/docker-compose.yml down
 ```
 
 ---
@@ -76,41 +84,41 @@ Requires **Go 1.22+** and **CGO** (for SQLite). From project root:
 
 ```bash
 # Create data dirs
-mkdir -p data/auth data/chat data/audit data/files data/raft
+mkdir -p backend/deploy/data/auth backend/deploy/data/chat backend/deploy/data/audit backend/deploy/data/files backend/deploy/data/raft
 
 # Run each service in a separate terminal (or use a process manager).
 
 # Terminal 1 – Auth
-cd services/auth && go run . &
+cd backend/services/auth && go run . &
 
 # Terminal 2 – Messaging
-cd services/messaging && go run . &
+cd backend/services/messaging && go run . &
 
 # Terminal 3 – Discovery
-cd services/discovery && go run . &
+cd backend/services/discovery && go run . &
 
 # Terminal 4 – Presence
-cd services/presence && go run . &
+cd backend/services/presence && PRESENCE_DB_PATH=../../deploy/data/shared/platform.db go run . &
 
 # Terminal 5 – Audit
-cd services/audit && go run . &
+cd backend/services/audit && go run . &
 
 # Terminal 6 – File transfer
-cd services/filetransfer && go run . &
+cd backend/services/filetransfer && go run . &
 
 # Terminal 7 – Cluster
-cd services/cluster && go run . &
+cd backend/services/cluster && go run . &
 ```
 
 Or use the workspace and run from root (each service has its own `main`):
 
 ```bash
-go run ./services/auth
-go run ./services/messaging
+go run ./backend/services/auth
+go run ./backend/services/messaging
 # … etc.
 ```
 
-Data is written under `data/` (and `./storage` for filetransfer if not overridden). Same `curl` commands as above; ensure ports 8081, 8083, 8084, 8086, etc. are free.
+Data is written under `backend/deploy/data/` (and `./storage` for filetransfer if not overridden). Same `curl` commands as above; ensure ports 8081, 8083, 8084, 8086, etc. are free.
 
 ---
 
@@ -145,4 +153,4 @@ For a **physical device**, use your computer’s LAN IP (e.g. `http://192.168.1.
 - **Port in use**: Change `PORT` (or the port in code) per service, or stop the process using the port.
 - **Auth 404 / wrong port**: Auth defaults to `8086`; use `http://localhost:8086` for login/register.
 - **Messaging “anonymous” sender**: Send `X-User-ID: <user_id>` with the request (or log in and use the token your client sends).
-- **Docker build fails**: Ensure Docker context is the repo root so `pkg/` and `services/` are available; use `docker-compose build` from the root.
+- **Docker build fails**: Ensure Docker context is the repo root so `backend/pkg/` and `backend/services/` are available; use `docker-compose -f backend/deploy/docker-compose.yml build` from the root.

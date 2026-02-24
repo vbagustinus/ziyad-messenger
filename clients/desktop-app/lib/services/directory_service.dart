@@ -4,9 +4,14 @@ import '../models/user.dart';
 
 class DirectoryService {
   final String adminBaseUrl;
+  final String messagingBaseUrl;
   final String token;
 
-  DirectoryService({required this.adminBaseUrl, required this.token});
+  DirectoryService({
+    required this.adminBaseUrl,
+    required this.messagingBaseUrl,
+    required this.token,
+  });
 
   Future<List<User>> getUsers() async {
     try {
@@ -37,9 +42,9 @@ class DirectoryService {
   Future<List<Map<String, dynamic>>> getChannels() async {
     try {
       final response = await http.get(
-        Uri.parse('$adminBaseUrl/public/channels'),
+        Uri.parse('$messagingBaseUrl/channels'),
         headers: {
-          'Content-Type': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
         },
       );
 
@@ -57,9 +62,8 @@ class DirectoryService {
   Future<List<Map<String, dynamic>>> getChannelMembers(String channelId) async {
     try {
       final response = await http.get(
-        Uri.parse('$adminBaseUrl/admin/channels/$channelId/members'),
+        Uri.parse('$messagingBaseUrl/channel-members?channel_id=$channelId'),
         headers: {
-          'Content-Type': 'application/json',
           if (token.isNotEmpty) 'Authorization': 'Bearer $token',
         },
       );

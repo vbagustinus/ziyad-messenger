@@ -5,40 +5,46 @@ import { monitoringApi } from '@/services/api';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
-type NetworkStats = { nodes_online: number; peers_known: number; uptime_seconds: number; latency_ms: number };
-type UserStats = { total_users: number; online_now: number; active_today: number };
-type MessageStats = { messages_last_hour: number; messages_today: number; total_messages: number };
+type OverviewStats = {
+  generated_at: number;
+  network: { nodes_online: number; peers_known: number; uptime_seconds: number; latency_ms: number };
+  users: { total_users: number; online_now: number; active_today: number };
+  messages: { messages_last_hour: number; messages_today: number; total_messages: number };
+  files: { total_files: number; total_bytes: number; transfers_today: number };
+  system: { go_version: string; num_cpu: number; memory_alloc_mb: number; uptime_seconds: number };
+};
 
 export default function DashboardPage() {
-  const [network, setNetwork] = useState<NetworkStats | null>(null);
-  const [users, setUsers] = useState<UserStats | null>(null);
-  const [messages, setMessages] = useState<MessageStats | null>(null);
+  const [overview, setOverview] = useState<OverviewStats | null>(null);
   const [events, setEvents] = useState<Array<{ event: string; at: string }>>([]);
   const { connected } = useWebSocket((msg) => {
     setEvents((prev) => [...prev.slice(-19), { event: msg.event, at: new Date().toLocaleTimeString() }]);
   });
 
   useEffect(() => {
-    monitoringApi.network().then((r) => setNetwork(r.data)).catch(() => {});
-    monitoringApi.users().then((r) => setUsers(r.data)).catch(() => {});
-    monitoringApi.messages().then((r) => setMessages(r.data)).catch(() => {});
+    const fetchOverview = () => {
+      monitoringApi.overview().then((r) => setOverview(r.data)).catch(() => {});
+    };
+    fetchOverview();
+    const timer = window.setInterval(fetchOverview, 15000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const chartData = [
-    { name: 'Users', value: users?.total_users ?? 0 },
-    { name: 'Online', value: users?.online_now ?? 0 },
-    { name: 'Nodes', value: network?.nodes_online ?? 0 },
-    { name: 'Msg/hour', value: messages?.messages_last_hour ?? 0 },
+    { name: 'Users', value: overview?.users.total_users ?? 0 },
+    { name: 'Online', value: overview?.users.online_now ?? 0 },
+    { name: 'Nodes', value: overview?.network.nodes_online ?? 0 },
+    { name: 'Msg/hour', value: overview?.messages.messages_last_hour ?? 0 },
   ];
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold text-slate-800">Dashboard</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card title="Nodes Online" value={network?.nodes_online ?? '-'} />
-        <Card title="Total Users" value={users?.total_users ?? '-'} />
-        <Card title="Online Now" value={users?.online_now ?? '-'} />
-        <Card title="Messages (1h)" value={messages?.messages_last_hour ?? '-'} />
+        <Card title="Nodes Online" value={overview?.network.nodes_online ?? '-'} />
+        <Card title="Total Users" value={overview?.users.total_users ?? '-'} />
+        <Card title="Online Now" value={overview?.users.online_now ?? '-'} />
+        <Card title="Messages (1h)" value={overview?.messages.messages_last_hour ?? '-'} />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="rounded-lg border border-slate-200 bg-white p-4">

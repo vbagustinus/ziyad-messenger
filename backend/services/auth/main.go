@@ -1,13 +1,18 @@
 package main
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +32,119 @@ type User struct {
 type AuthService struct {
 	db *sql.DB
 	mu sync.RWMutex
+}
+
+const requestIDHeader = "X-Request-ID"
+const defaultAuthBodyLimit = 1 << 20 // 1 MiB
+
+var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{3,32}$`)
+var authLimiter = newIPRateLimiter(60, time.Minute)
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusRecorder) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+type ipRateLimiter struct {
+	mu     sync.Mutex
+	limit  int
+	window time.Duration
+	hits   map[string][]time.Time
+}
+
+func newIPRateLimiter(limit int, window time.Duration) *ipRateLimiter {
+	return &ipRateLimiter{
+		limit:  limit,
+		window: window,
+		hits:   make(map[string][]time.Time),
+	}
+}
+
+func (l *ipRateLimiter) Allow(ip string) bool {
+	now := time.Now()
+	cutoff := now.Add(-l.window)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	list := l.hits[ip]
+	i := 0
+	for i < len(list) && list[i].Before(cutoff) {
+		i++
+	}
+	if i > 0 {
+		list = list[i:]
+	}
+	if len(list) >= l.limit {
+		l.hits[ip] = list
+		return false
+	}
+	list = append(list, now)
+	l.hits[ip] = list
+	return true
+}
+
+func clientIP(r *http.Request) string {
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func getOrCreateRequestID(req *http.Request) string {
+	if rid := strings.TrimSpace(req.Header.Get(requestIDHeader)); rid != "" {
+		return rid
+	}
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return uuid.NewString()
+}
+
+func withRequestTrace(name string, maxBodyBytes int64, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rid := getOrCreateRequestID(r)
+		w.Header().Set(requestIDHeader, rid)
+		r.Header.Set(requestIDHeader, rid)
+
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		if !authLimiter.Allow(clientIP(r)) {
+			http.Error(rec, "Too many requests", http.StatusTooManyRequests)
+		} else {
+			if maxBodyBytes > 0 {
+				r.Body = http.MaxBytesReader(rec, r.Body, maxBodyBytes)
+			}
+			next(rec, r)
+		}
+
+		entry := map[string]interface{}{
+			"ts":         time.Now().UTC().Format(time.RFC3339Nano),
+			"service":    "auth",
+			"handler":    name,
+			"request_id": rid,
+			"method":     r.Method,
+			"path":       r.URL.Path,
+			"status":     rec.status,
+			"latency_ms": float64(time.Since(start).Microseconds()) / 1000.0,
+		}
+		if b, err := json.Marshal(entry); err == nil {
+			log.Println(string(b))
+		}
+	}
 }
 
 func NewAuthService(dbPath string) (*AuthService, error) {
@@ -96,6 +214,25 @@ func (s *AuthService) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.FullName = strings.TrimSpace(req.FullName)
+	req.Role = strings.TrimSpace(req.Role)
+	if !usernamePattern.MatchString(req.Username) {
+		http.Error(w, "Invalid username format", http.StatusBadRequest)
+		return
+	}
+	if len(req.Password) < 8 || len(req.Password) > 72 {
+		http.Error(w, "Password length must be 8-72", http.StatusBadRequest)
+		return
+	}
+	if len(req.FullName) > 80 {
+		http.Error(w, "Full name too long", http.StatusBadRequest)
+		return
+	}
+	if len(req.Role) > 40 {
+		http.Error(w, "Role too long", http.StatusBadRequest)
+		return
+	}
 
 	hash, err := HashPassword(req.Password)
 	if err != nil {
@@ -127,6 +264,15 @@ func (s *AuthService) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" || req.Password == "" {
+		http.Error(w, "Missing credentials", http.StatusBadRequest)
+		return
+	}
+	if len(req.Username) > 64 || len(req.Password) > 128 {
+		http.Error(w, "Invalid credentials format", http.StatusBadRequest)
 		return
 	}
 
@@ -211,18 +357,27 @@ func main() {
 		log.Printf("Failed to ensure default user: %v", err)
 	}
 
-	http.HandleFunc("/register", svc.RegisterHandler)
-	http.HandleFunc("/login", svc.LoginHandler)
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/register", withRequestTrace("register", defaultAuthBodyLimit, svc.RegisterHandler))
+	mux.HandleFunc("/login", withRequestTrace("login", defaultAuthBodyLimit, svc.LoginHandler))
+	mux.HandleFunc("/health", withRequestTrace("health", 0, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "Auth Service is running")
-	})
+	}))
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8086"
 	}
 
+	server := &http.Server{
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	log.Printf("Auth Service started on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(server.ListenAndServe())
 }

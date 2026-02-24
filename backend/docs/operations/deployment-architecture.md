@@ -49,7 +49,7 @@ flowchart TB
 
 ## Container and Orchestration
 
-- **Docker**: Each service can run as a container; `docker-compose` for single-node or small cluster (see project `docker-compose.yml`).
+- **Docker**: Each service can run as a container; `docker-compose` for single-node or small cluster (see `backend/deploy/docker-compose.yml`).
 - **Kubernetes (optional)**: Helm chart for deployment; StatefulSet for Raft nodes; ConfigMaps/Secrets for config and certs; persistent volumes for SQLite and audit.
 - **Bare metal / VMs**: Systemd units or init scripts; same binaries; config from files or env.
 

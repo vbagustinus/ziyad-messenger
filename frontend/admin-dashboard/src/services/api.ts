@@ -81,11 +81,14 @@ export const channelsApi = {
 };
 
 export const monitoringApi = {
-  network: () => api.get<{ nodes_online: number; peers_known: number; uptime_seconds: number; latency_ms: number }>('/admin/monitoring/network'),
-  users: () => api.get<{ total_users: number; online_now: number; active_today: number }>('/admin/monitoring/users'),
-  messages: () => api.get<{ messages_last_hour: number; messages_today: number; total_messages: number }>('/admin/monitoring/messages'),
-  files: () => api.get<{ total_files: number; total_bytes: number; transfers_today: number }>('/admin/monitoring/files'),
-  system: () => api.get<{ go_version: string; num_cpu: number; memory_alloc_mb: number; uptime_seconds: number }>('/admin/monitoring/system'),
+  overview: () => api.get<{
+    generated_at: number;
+    network: { nodes_online: number; peers_known: number; uptime_seconds: number; latency_ms: number };
+    users: { total_users: number; online_now: number; active_today: number };
+    messages: { messages_last_hour: number; messages_today: number; total_messages: number };
+    files: { total_files: number; total_bytes: number; transfers_today: number };
+    system: { go_version: string; num_cpu: number; memory_alloc_mb: number; uptime_seconds: number };
+  }>('/admin/monitoring/overview'),
 };
 
 export const auditApi = {

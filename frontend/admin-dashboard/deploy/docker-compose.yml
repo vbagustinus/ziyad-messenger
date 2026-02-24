@@ -1,0 +1,11 @@
+name: frontend-admin
+
+services:
+  admin-dashboard:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "8091:8091"
+    environment:
+      - NEXT_PUBLIC_ADMIN_API=http://localhost:8090

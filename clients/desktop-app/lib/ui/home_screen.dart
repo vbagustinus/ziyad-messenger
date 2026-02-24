@@ -72,9 +72,9 @@ class HomeScreen extends StatelessWidget {
                   channelId: item['id']!,
                   channelName: item['name']!,
                   messagingService: MessagingService(
-                    baseUrl: AppConfig.messagingBaseUrl,
+                    httpBaseUrl: AppConfig.messagingBaseUrl,
+                    wsBaseUrl: AppConfig.wsMessagingBaseUrl,
                     token: authService.currentUser!.token ?? '',
-                    userId: authService.currentUser!.id,
                   ),
                 ),
               ),

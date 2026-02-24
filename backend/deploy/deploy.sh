@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Configuration
 SERVER="192.168.200.252"
@@ -8,6 +9,8 @@ PASS="bismillahAdmin" # Provided by user
 # sshpass -p "$PASS" ssh ...
 # sshpass -p "$PASS" rsync ...
 TARGET_DIR="/home/mobile/ziyad-messenger"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 echo "🚀 Preparing deployment to $SERVER..."
 
@@ -20,22 +23,22 @@ rsync -avz --delete \
           --exclude '.git' \
           --exclude '*/node_modules' \
           --exclude 'frontend/admin-dashboard/.next' \
-          --exclude 'data' \
+          --exclude 'backend/deploy/data' \
           --exclude 'clients' \
-          ./ $USER@$SERVER:$TARGET_DIR
+          "$REPO_ROOT"/ $USER@$SERVER:$TARGET_DIR
 
 # 2. Run remote commands
 echo "🛠️  Building and starting services on $SERVER..."
 ssh $USER@$SERVER << EOF
-    cd $TARGET_DIR
+    cd $TARGET_DIR/backend
     # Ensure env is correct for the internal local network IP
-    sed -i "s/60.60.111.97/$SERVER/g" docker-compose.yml || true
-    sed -i "s/api-dev.ziyadbooks.com/$SERVER/g" docker-compose.yml || true
+    sed -i "s/60.60.111.97/$SERVER/g" deploy/docker-compose.yml || true
+    sed -i "s/api-dev.ziyadbooks.com/$SERVER/g" deploy/docker-compose.yml || true
     
-    docker compose down
-    docker compose build
-    docker compose up -d
-    docker compose ps
+    docker compose -f deploy/docker-compose.yml down
+    docker compose -f deploy/docker-compose.yml build
+    docker compose -f deploy/docker-compose.yml up -d
+    docker compose -f deploy/docker-compose.yml ps
 EOF
 
 echo "✅ Deployment complete!"

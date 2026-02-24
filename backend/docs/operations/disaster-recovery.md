@@ -9,12 +9,12 @@
 
 | Data | Location | Backup method | Frequency |
 |------|----------|----------------|------------|
-| **Auth DB** | `data/auth/users.db` (or configured path) | File copy or SQLite backup | Daily or before changes |
-| **Messaging DB** | `data/chat/chat.db` | File copy or `.backup` | Continuous or hourly |
+| **Auth DB** | `backend/deploy/data/shared/platform.db` (or configured path) | File copy or SQLite backup | Daily or before changes |
+| **Messaging DB** | `backend/deploy/data/shared/platform.db` | File copy or `.backup` | Continuous or hourly |
 | **Channels** | Channel service DB | Same as above | Same |
-| **Audit log** | `data/audit/audit.log` | Append-only copy; do not truncate | Real-time or hourly |
+| **Audit log** | `backend/deploy/data/audit/audit.log` | Append-only copy; do not truncate | Real-time or hourly |
 | **File storage** | Encrypted files on disk | Filesystem backup | Daily |
-| **Raft data** | `raft-data/` (or configured) | Full directory copy | Before upgrade; optional continuous |
+| **Raft data** | `backend/deploy/data/raft/` (or configured) | Full directory copy | Before upgrade; optional continuous |
 | **PKI** | CA cert and key (offline) | Secure offline copy | Once + after any issuance |
 | **Config** | YAML/env and secrets | Versioned copy | On change |
 

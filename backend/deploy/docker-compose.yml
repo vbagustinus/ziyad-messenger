@@ -1,9 +1,9 @@
-version: "3.8"
+name: backend-stack
 
 services:
   discovery:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile
     command: /usr/local/bin/discovery node-1
     ports:
@@ -14,7 +14,7 @@ services:
 
   auth:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile
     command: /usr/local/bin/auth
     ports:
@@ -28,7 +28,7 @@ services:
 
   admin-service:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile
     command: /usr/local/bin/admin-service
     ports:
@@ -40,21 +40,9 @@ services:
     networks:
       - lan-chat-net
 
-  admin-dashboard:
-    build:
-      context: ./frontend/admin-dashboard
-      dockerfile: Dockerfile
-    ports:
-      - "8091:8091"
-    environment:
-      - NEXT_PUBLIC_ADMIN_API=http://192.168.200.252:8090
-      - ADMIN_API_INTERNAL=http://admin-service:8090
-    networks:
-      - lan-chat-net
-
   messaging:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile
     command: /usr/local/bin/messaging
     ports:
@@ -68,7 +56,7 @@ services:
 
   filetransfer:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile
     command: /usr/local/bin/filetransfer
     ports:
@@ -80,17 +68,21 @@ services:
 
   presence:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile
     command: /usr/local/bin/presence
     ports:
       - "8083:8083"
+    environment:
+      - PRESENCE_DB_PATH=/app/data/platform.db
+    volumes:
+      - ./data/shared:/app/data
     networks:
       - lan-chat-net
 
   audit:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile
     command: /usr/local/bin/audit
     ports:
@@ -102,7 +94,7 @@ services:
 
   cluster:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile
     command: /usr/local/bin/cluster
     ports:

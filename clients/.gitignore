@@ -1,0 +1,9 @@
+# Flutter/Dart build artifacts
+desktop-app/build/
+desktop-app/.dart_tool/
+desktop-app/.packages
+desktop-app/.pub-cache/
+desktop-app/.pub/
+
+# OS noise
+.DS_Store

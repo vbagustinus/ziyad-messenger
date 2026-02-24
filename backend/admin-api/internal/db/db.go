@@ -91,6 +91,18 @@ func migrate() error {
 		FOREIGN KEY (department_id) REFERENCES departments(id)
 	);
 
+	CREATE TABLE IF NOT EXISTS devices (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		device_name TEXT NOT NULL,
+		fingerprint TEXT UNIQUE NOT NULL,
+		last_seen INTEGER,
+		created_at INTEGER NOT NULL,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id);
+	CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen);
+
 	CREATE TABLE IF NOT EXISTS audit_logs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		timestamp INTEGER NOT NULL,

@@ -1,16 +1,19 @@
 .PHONY: build run-all stop-all test-auth test-messaging admin-run admin-build
 
+MAKE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+BACKEND_ROOT := $(abspath $(MAKE_DIR)/..)
+
 build:
-	docker-compose build
+	docker-compose -f $(MAKE_DIR)/docker-compose.yml build
 
 run-all:
-	docker-compose up -d
+	docker-compose -f $(MAKE_DIR)/docker-compose.yml up -d
 
 stop-all:
-	docker-compose down
+	docker-compose -f $(MAKE_DIR)/docker-compose.yml down
 
 logs:
-	docker-compose logs -f
+	docker-compose -f $(MAKE_DIR)/docker-compose.yml logs -f
 
 # Manual Test Commands (Requires curl). Run after: make run-all
 test-auth-register:
@@ -25,18 +28,12 @@ test-send-message:
 test-heartbeat:
 	curl -s -X POST http://localhost:8083/heartbeat -H "Content-Type: application/json" -d '{"user_id":"test-user","status":1}'
 
-# Admin service (from project root; admin-api is in go.work)
+# Admin service (run via: cd backend/deploy && make admin-run)
 admin-run:
-	go run ./backend/admin-api/cmd/server
+	cd $(BACKEND_ROOT) && go run ./admin-api/cmd/server
 
 admin-build:
-	go build -o bin/admin-server ./backend/admin-api/cmd/server
-
-dashboard-run:
-	cd frontend/admin-dashboard && npm run dev
-
-dashboard-build:
-	cd frontend/admin-dashboard && npm run build
+	mkdir -p $(MAKE_DIR)/bin && cd $(BACKEND_ROOT) && go build -o $(MAKE_DIR)/bin/admin-server ./admin-api/cmd/server
 
 # Quick health checks
 health:

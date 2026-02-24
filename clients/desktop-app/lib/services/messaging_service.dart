@@ -8,7 +8,6 @@ class MessagingService {
   final String httpBaseUrl;
   final String wsBaseUrl;
   final String token;
-  final String userId;
 
   WebSocketChannel? _channel;
   final StreamController<Message> _messageController = StreamController<Message>.broadcast();
@@ -17,13 +16,16 @@ class MessagingService {
     required this.httpBaseUrl,
     required this.wsBaseUrl,
     required this.token,
-    required this.userId,
   });
 
   Stream<Message> get messageStream => _messageController.stream;
 
   void connect() {
-    final uri = Uri.parse('$wsBaseUrl/ws?user_id=$userId');
+    if (token.isEmpty) {
+      print('WS connect skipped: missing token');
+      return;
+    }
+    final uri = Uri.parse('$wsBaseUrl/ws?token=$token');
     _channel = WebSocketChannel.connect(uri);
 
     _channel!.stream.listen((data) {
@@ -40,6 +42,65 @@ class MessagingService {
     }, onError: (e) {
       print('WS error: $e');
     });
+  }
+
+  Future<List<Map<String, dynamic>>> getMyChannels() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$httpBaseUrl/channels'),
+        headers: {
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return List<Map<String, dynamic>>.from(data['channels'] ?? const []);
+      }
+      return [];
+    } catch (e) {
+      print('Channels error: $e');
+      return [];
+    }
+  }
+
+  Future<String?> createDMChannel(String targetUserId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$httpBaseUrl/dm'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'target_user_id': targetUserId}),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return data['channel_id'] as String?;
+      }
+      return null;
+    } catch (e) {
+      print('Create DM error: $e');
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getChannelMembers(String channelId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$httpBaseUrl/channel-members?channel_id=$channelId'),
+        headers: {
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return List<Map<String, dynamic>>.from(data['members'] ?? const []);
+      }
+      return [];
+    } catch (e) {
+      print('Channel members error: $e');
+      return [];
+    }
   }
 
   Future<List<Message>> getHistory(String channelId) async {
@@ -83,7 +144,6 @@ class MessagingService {
         body: jsonEncode(payload),
         headers: {
           'Content-Type': 'application/json',
-          'X-User-ID': userId,
           if (token.isNotEmpty) 'Authorization': 'Bearer $token',
         },
       );

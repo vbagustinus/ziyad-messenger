@@ -1,0 +1,14 @@
+go 1.22
+
+use (
+	./admin-api
+	./pkg/protocol
+	./services/audit
+	./services/auth
+	./services/cluster
+	./services/discovery
+	./services/filetransfer
+	./services/messaging
+	./services/pki
+	./services/presence
+)

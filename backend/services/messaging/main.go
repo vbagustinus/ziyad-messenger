@@ -1,17 +1,23 @@
 package main
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"lan-chat/protocol"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	_ "github.com/mattn/go-sqlite3"
@@ -19,6 +25,55 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+const requestIDHeader = "X-Request-ID"
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusRecorder) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func getOrCreateRequestID(req *http.Request) string {
+	if rid := strings.TrimSpace(req.Header.Get(requestIDHeader)); rid != "" {
+		return rid
+	}
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return uuid.NewString()
+}
+
+func withRequestTrace(name string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		start := time.Now()
+		rid := getOrCreateRequestID(req)
+		w.Header().Set(requestIDHeader, rid)
+		req.Header.Set(requestIDHeader, rid)
+
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next(rec, req)
+
+		entry := map[string]interface{}{
+			"ts":         time.Now().UTC().Format(time.RFC3339Nano),
+			"service":    "messaging",
+			"handler":    name,
+			"request_id": rid,
+			"method":     req.Method,
+			"path":       req.URL.Path,
+			"status":     rec.status,
+			"latency_ms": float64(time.Since(start).Microseconds()) / 1000.0,
+		}
+		if b, err := json.Marshal(entry); err == nil {
+			log.Println(string(b))
+		}
+	}
 }
 
 // Client represents a connected user over WebSocket
@@ -33,6 +88,67 @@ type MessageRouter struct {
 	db      *sql.DB
 	clients map[string][]*Client // UserID -> Multiple connections
 	mu      sync.RWMutex
+}
+
+var (
+	errUnauthorized   = errors.New("unauthorized")
+	errChannelMissing = errors.New("channel not found")
+	errForbidden      = errors.New("forbidden")
+)
+
+type Claims struct {
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	jwt.RegisteredClaims
+}
+
+type ChannelView struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+type ChannelMemberView struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	FullName string `json:"full_name"`
+}
+
+type CreateDMRequest struct {
+	TargetUserID string `json:"target_user_id"`
+}
+
+func jwtSecret() []byte {
+	secret := os.Getenv("MESSAGING_JWT_SECRET")
+	if secret == "" {
+		secret = "my_secret_key"
+	}
+	return []byte(secret)
+}
+
+func validateToken(tokenString string) (*Claims, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret(), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !token.Valid {
+		return nil, errUnauthorized
+	}
+	return claims, nil
+}
+
+func bearerToken(req *http.Request) string {
+	raw := req.Header.Get("Authorization")
+	if raw != "" {
+		parts := strings.SplitN(raw, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+			return parts[1]
+		}
+	}
+	return req.URL.Query().Get("token")
 }
 
 func NewMessageRouter(dbPath string) (*MessageRouter, error) {
@@ -118,12 +234,9 @@ func (r *MessageRouter) Unregister(client *Client) {
 // getChannelMembers returns a list of user IDs who are members of the channel.
 // If the channel is 'public', it returns an empty list (meaning broadcast to all).
 func (r *MessageRouter) getChannelMembers(channelID string) ([]string, string, error) {
-	var chType string
-	err := r.db.QueryRow("SELECT type FROM channels WHERE id = ?", channelID).Scan(&chType)
+	chType, err := r.getChannelType(channelID)
 	if err != nil {
-		// Fallback for demo or if channel not in main DB (messaging might have its own table if synced)
-		// Assuming for now it's in the same DB or we have access to it.
-		return nil, "public", nil
+		return nil, "", err
 	}
 
 	if chType == "public" {
@@ -146,12 +259,152 @@ func (r *MessageRouter) getChannelMembers(channelID string) ([]string, string, e
 	return members, chType, nil
 }
 
+func (r *MessageRouter) getChannelType(channelID string) (string, error) {
+	var chType string
+	err := r.db.QueryRow("SELECT type FROM channels WHERE id = ?", channelID).Scan(&chType)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", errChannelMissing
+		}
+		return "", err
+	}
+	return chType, nil
+}
+
+func (r *MessageRouter) userExists(userID string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", userID).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (r *MessageRouter) findUserIDByUsername(username string) (string, error) {
+	var userID string
+	err := r.db.QueryRow("SELECT id FROM users WHERE username = ?", username).Scan(&userID)
+	if err != nil {
+		return "", err
+	}
+	return userID, nil
+}
+
+func (r *MessageRouter) isChannelMember(channelID, userID string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?)",
+		channelID, userID,
+	).Scan(&exists)
+	return exists, err
+}
+
+func (r *MessageRouter) authorizeChannelAccess(userID, channelID string) error {
+	chType, err := r.getChannelType(channelID)
+	if err != nil {
+		return err
+	}
+	if chType == "public" {
+		return nil
+	}
+	member, err := r.isChannelMember(channelID, userID)
+	if err != nil {
+		return err
+	}
+	if !member {
+		return errForbidden
+	}
+	return nil
+}
+
+func (r *MessageRouter) listAccessibleChannels(userID string) ([]ChannelView, error) {
+	rows, err := r.db.Query(`
+		SELECT DISTINCT c.id, c.name, c.type
+		FROM channels c
+		LEFT JOIN channel_members m ON c.id = m.channel_id
+		WHERE c.type = 'public' OR m.user_id = ?
+		ORDER BY c.name ASC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]ChannelView, 0)
+	for rows.Next() {
+		var ch ChannelView
+		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Type); err == nil {
+			out = append(out, ch)
+		}
+	}
+	return out, nil
+}
+
+func (r *MessageRouter) listChannelMembers(channelID string) ([]ChannelMemberView, error) {
+	rows, err := r.db.Query(`
+		SELECT u.id, u.username, COALESCE(u.full_name, '')
+		FROM channel_members m
+		JOIN users u ON u.id = m.user_id
+		WHERE m.channel_id = ?
+		ORDER BY u.username ASC`, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]ChannelMemberView, 0)
+	for rows.Next() {
+		var m ChannelMemberView
+		if err := rows.Scan(&m.ID, &m.Username, &m.FullName); err == nil {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+func (r *MessageRouter) resolveRequestedChannel(senderID, requestedChannelID string) (string, error) {
+	if requestedChannelID == "" {
+		return "", errChannelMissing
+	}
+
+	if _, err := r.getChannelType(requestedChannelID); err == nil {
+		return requestedChannelID, nil
+	} else if !errors.Is(err, errChannelMissing) {
+		return "", err
+	}
+
+	exists, err := r.userExists(requestedChannelID)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", errChannelMissing
+	}
+	if requestedChannelID == senderID {
+		return "", errForbidden
+	}
+	return r.findOrCreateDMChannel(senderID, requestedChannelID)
+}
+
+func (r *MessageRouter) authenticate(req *http.Request) (string, error) {
+	token := bearerToken(req)
+	if token == "" {
+		return "", errUnauthorized
+	}
+	claims, err := validateToken(token)
+	if err != nil {
+		return "", errUnauthorized
+	}
+	userID, err := r.findUserIDByUsername(claims.Username)
+	if err != nil {
+		return "", errUnauthorized
+	}
+	return userID, nil
+}
+
 // Broadcast sends a message to specific users (who should receive this message)
-func (r *MessageRouter) Broadcast(msg *protocol.Message) {
+func (r *MessageRouter) Broadcast(msg *protocol.Message) error {
 	members, chType, err := r.getChannelMembers(msg.ChannelID)
 	if err != nil {
-		log.Printf("Error getting members: %v", err)
-		return
+		return err
 	}
 
 	r.mu.RLock()
@@ -182,6 +435,7 @@ func (r *MessageRouter) Broadcast(msg *protocol.Message) {
 			}
 		}
 	}
+	return nil
 }
 
 // findOrCreateDMChannel ensures a DM channel exists between two users.
@@ -227,15 +481,16 @@ func (r *MessageRouter) findOrCreateDMChannel(u1, u2 string) (string, error) {
 
 // HandleWS handles WebSocket upgrade and loop
 func (r *MessageRouter) HandleWS(w http.ResponseWriter, req *http.Request) {
+	userID, err := r.authenticate(req)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
 		log.Printf("Upgrade error: %v", err)
 		return
-	}
-
-	userID := req.URL.Query().Get("user_id")
-	if userID == "" {
-		userID = "anonymous-" + uuid.New().String()[:8]
 	}
 
 	client := r.Register(userID, conn)
@@ -255,21 +510,17 @@ func (r *MessageRouter) HandleWS(w http.ResponseWriter, req *http.Request) {
 
 			var sendReq protocol.SendMessageRequest
 			if err := json.Unmarshal(message, &sendReq); err == nil {
-				// DM detection: if channel_id matches a user pattern or we decide by prefix
-				// For LAN Slack, if a client sends a message to another UserID instead of a ChannelID,
-				// we treat it as a DM request.
-				finalChannelID := sendReq.ChannelID
-				if len(sendReq.ChannelID) > 0 && sendReq.ChannelID[0] != 'c' && sendReq.ChannelID != "general" {
-					// Heuristic: if it's not a known channel prefix, try DM
-					// In a real app, we'd check if ChannelID exists as a user if not as a channel.
-					if dmID, err := r.findOrCreateDMChannel(userID, sendReq.ChannelID); err == nil {
-						finalChannelID = dmID
-					}
+				finalChannelID, err := r.resolveRequestedChannel(userID, sendReq.ChannelID)
+				if err != nil {
+					continue
+				}
+				if err := r.authorizeChannelAccess(userID, finalChannelID); err != nil {
+					continue
 				}
 
 				msg, err := r.SaveMessage(sendReq, userID, finalChannelID)
 				if err == nil {
-					r.Broadcast(msg)
+					_ = r.Broadcast(msg)
 				}
 			}
 		}
@@ -309,9 +560,25 @@ func (r *MessageRouter) SaveMessage(req protocol.SendMessageRequest, senderID st
 }
 
 func (r *MessageRouter) HistoryHandler(w http.ResponseWriter, req *http.Request) {
-	channelID := req.URL.Query().Get("channel_id")
-	if channelID == "" {
+	userID, err := r.authenticate(req)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	requestedChannelID := req.URL.Query().Get("channel_id")
+	if requestedChannelID == "" {
 		http.Error(w, "missing channel_id", http.StatusBadRequest)
+		return
+	}
+
+	channelID, err := r.resolveRequestedChannel(userID, requestedChannelID)
+	if err != nil {
+		http.Error(w, "channel not found", http.StatusNotFound)
+		return
+	}
+	if err := r.authorizeChannelAccess(userID, channelID); err != nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -337,13 +604,104 @@ func (r *MessageRouter) HistoryHandler(w http.ResponseWriter, req *http.Request)
 	json.NewEncoder(w).Encode(history)
 }
 
+func (r *MessageRouter) ChannelsHandler(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := r.authenticate(req)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	channels, err := r.listAccessibleChannels(userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"channels": channels})
+}
+
+func (r *MessageRouter) ChannelMembersHandler(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := r.authenticate(req)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	channelID := req.URL.Query().Get("channel_id")
+	if channelID == "" {
+		http.Error(w, "missing channel_id", http.StatusBadRequest)
+		return
+	}
+	if err := r.authorizeChannelAccess(userID, channelID); err != nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	members, err := r.listChannelMembers(channelID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"members": members})
+}
+
+func (r *MessageRouter) CreateDMHandler(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := r.authenticate(req)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var body CreateDMRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if body.TargetUserID == "" {
+		http.Error(w, "missing target_user_id", http.StatusBadRequest)
+		return
+	}
+	if body.TargetUserID == userID {
+		http.Error(w, "invalid target", http.StatusBadRequest)
+		return
+	}
+	exists, err := r.userExists(body.TargetUserID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !exists {
+		http.Error(w, "target user not found", http.StatusNotFound)
+		return
+	}
+
+	channelID, err := r.findOrCreateDMChannel(userID, body.TargetUserID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"channel_id": channelID})
+}
+
 func main() {
 	dbPath := os.Getenv("MESSAGING_DB_PATH")
 	if dbPath == "" {
 		dbPath = "data/chat.db"
 	}
 
-	if err := os.MkdirAll("data", 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
@@ -352,13 +710,17 @@ func main() {
 		log.Fatalf("Failed to initialize router: %v", err)
 	}
 
-	http.HandleFunc("/ws", router.HandleWS)
-	http.HandleFunc("/history", router.HistoryHandler)
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", withRequestTrace("ws", router.HandleWS))
+	mux.HandleFunc("/history", withRequestTrace("history", router.HistoryHandler))
+	mux.HandleFunc("/channels", withRequestTrace("channels", router.ChannelsHandler))
+	mux.HandleFunc("/channel-members", withRequestTrace("channel-members", router.ChannelMembersHandler))
+	mux.HandleFunc("/dm", withRequestTrace("dm", router.CreateDMHandler))
+	mux.HandleFunc("/health", withRequestTrace("health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "Messaging Service is running")
-	})
-	http.HandleFunc("/send", func(w http.ResponseWriter, req *http.Request) {
+	}))
+	mux.HandleFunc("/send", withRequestTrace("send", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -369,18 +731,34 @@ func main() {
 			return
 		}
 		senderID := req.Header.Get("X-User-ID")
-		if senderID == "" {
-			senderID = "anonymous"
+		authUserID, err := router.authenticate(req)
+		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		senderID = authUserID
+
+		channelID, err := router.resolveRequestedChannel(senderID, msgReq.ChannelID)
+		if err != nil {
+			http.Error(w, "channel not found", http.StatusNotFound)
+			return
+		}
+		if err := router.authorizeChannelAccess(senderID, channelID); err != nil {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
 		}
 
-		msg, err := router.SaveMessage(msgReq, senderID, msgReq.ChannelID)
+		msg, err := router.SaveMessage(msgReq, senderID, channelID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		router.Broadcast(msg)
+		if err := router.Broadcast(msg); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		json.NewEncoder(w).Encode(protocol.SendMessageResponse{MessageID: msg.ID, Success: true})
-	})
+	}))
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -388,5 +766,5 @@ func main() {
 	}
 
 	log.Printf("Messaging Service (WS/HTTP) started on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":"+port, mux))
 }

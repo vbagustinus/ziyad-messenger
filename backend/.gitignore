@@ -1,0 +1,17 @@
+# Binaries
+admin-api/bin/
+services/**/bin/
+
+# Local service data
+admin-api/data/
+services/auth/data/
+services/audit/data/
+services/chat/data/
+deploy/data/
+
+# Env and logs
+admin-api/.env
+services/audit/*.log
+
+# OS noise
+.DS_Store

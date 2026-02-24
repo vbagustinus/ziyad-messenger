@@ -1,0 +1,11 @@
+# Node/Next artifacts
+admin-dashboard/node_modules/
+admin-dashboard/.next/
+
+# Env
+admin-dashboard/.env
+admin-dashboard/.env.local
+admin-dashboard/.env.production
+
+# OS noise
+.DS_Store

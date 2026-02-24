@@ -47,24 +47,35 @@ class ChatProvider extends ChangeNotifier {
   List<Map<String, dynamic>> currentChannelMembers = [];
 
   Future<void> selectChannel(String channelId) async {
-    currentChannelId = channelId;
+    String resolvedChannelId = channelId;
+
+    // Selecting a user in DM list should resolve to a concrete DM channel first.
+    final selectedUser = users.where((u) => u.id == channelId).firstOrNull;
+    if (selectedUser != null) {
+      final dmChannelId = await messagingService.createDMChannel(selectedUser.id);
+      if (dmChannelId != null && dmChannelId.isNotEmpty) {
+        resolvedChannelId = dmChannelId;
+      }
+    }
+
+    currentChannelId = resolvedChannelId;
     currentChannelMembers = []; // Reset
     
     // Safety check: if choosing a user for DM that isn't yet in history but is in users list,
     // this handles the initial view.
-    final known = channels.any((c) => c['id'] == channelId) || users.any((u) => u.id == channelId);
+    final known = channels.any((c) => c['id'] == resolvedChannelId) || users.any((u) => u.id == resolvedChannelId);
     if (!known) {
       await loadDirectory();
     }
 
-    if (!messageHistory.containsKey(channelId)) {
-      final history = await messagingService.getHistory(channelId);
-      messageHistory[channelId] = history;
+    if (!messageHistory.containsKey(resolvedChannelId)) {
+      final history = await messagingService.getHistory(resolvedChannelId);
+      messageHistory[resolvedChannelId] = history;
     }
 
     // Load members if it's a channel (not a DM)
-    if (channels.any((c) => c['id'] == channelId)) {
-      currentChannelMembers = await directoryService.getChannelMembers(channelId);
+    if (channels.any((c) => c['id'] == resolvedChannelId)) {
+      currentChannelMembers = await directoryService.getChannelMembers(resolvedChannelId);
     }
 
     notifyListeners();

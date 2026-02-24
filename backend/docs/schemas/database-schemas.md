@@ -101,10 +101,10 @@ CREATE INDEX idx_channel_members_user ON channel_members(user_id);
 
 ---
 
-## Presence (in-memory or optional persistence)
+## Presence (`user_presence`)
 
 ```sql
-CREATE TABLE IF NOT EXISTS presence (
+CREATE TABLE IF NOT EXISTS user_presence (
     user_id     TEXT PRIMARY KEY,
     status      INTEGER NOT NULL,
     last_seen   INTEGER NOT NULL,
